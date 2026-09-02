@@ -228,6 +228,41 @@ class AutoReviewQueueTests(unittest.TestCase):
             calls[-1],
         )
 
+    def test_review_worktree_does_not_remove_after_add_failure(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        worktree = Path(tmp.name) / "review-worktree"
+        calls: list[list[str]] = []
+
+        def fake_run(command: list[str], *, cwd: Path, capture: bool = True):
+            calls.append(command)
+            if command[1:3] == ["worktree", "add"]:
+                raise WorkerError("worktree add failed")
+            return type("Completed", (), {"stdout": ""})()
+
+        with patch("auto_review_queue.run", side_effect=fake_run):
+            with self.assertRaisesRegex(WorkerError, "worktree add failed"):
+                create_review_worktree(
+                    ROOT,
+                    worktree,
+                    "refs/review/head",
+                    "submissions/alice/plan",
+                )
+
+        self.assertEqual(
+            [
+                "git",
+                "worktree",
+                "add",
+                "--detach",
+                "--no-checkout",
+                str(worktree),
+                "refs/review/head",
+            ],
+            calls[0],
+        )
+        self.assertEqual(1, len(calls))
+
     def test_accepts_score_at_threshold_when_intake_ready_even_if_not_publishable(self) -> None:
         review = {
             "mandatory_rejection": {"result": "pass"},
